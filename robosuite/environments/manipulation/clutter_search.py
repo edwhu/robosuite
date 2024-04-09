@@ -972,11 +972,11 @@ class ClutterSearchSingle(ClutterSearch):
             horizon=10000000,
             ignore_done=ignore_done,
             use_object_obs=False,
-            use_camera_obs=True,
+            use_camera_obs=use_camera_obs,
             camera_names=["agentview"],
             camera_widths=64,
             camera_heights=64,
-            control_freq=20,
+            control_freq=control_freq,
             robot_configs=robot_configs,
             **kwargs
         )

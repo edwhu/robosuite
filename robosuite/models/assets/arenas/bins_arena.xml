@@ -84,6 +84,5 @@
     <camera mode="fixed" name="agentview" pos="1.0 0 1.75" quat="0.653 0.271 0.271 0.653"/>
     <!-- under view -->
     <camera mode="fixed" name="underview" pos="0.1 -0.1 0.2" euler="3.14 0 0"/>
-    <site  pos="0.1 -0.1 0.2" size="0.03" rgba="0 1 0 1"/>
   </worldbody>
 </mujoco>
