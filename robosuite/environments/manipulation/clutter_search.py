@@ -637,7 +637,7 @@ class ClutterSearch(SingleArmEnv):
         self.objects.append(obj)
 
         # initialize objects of interest
-        for i in range(20):
+        for i in range(25):
             obj = BoxObject(
                 name=f"cube{i}",
                 size_min=[0.020, 0.020, 0.005],  # [0.015, 0.015, 0.015],
@@ -815,17 +815,53 @@ class ClutterSearch(SingleArmEnv):
         if not self.deterministic_reset:
 
             # Sample from the placement initializer for all objects
-            object_placements = self.placement_initializer.sample()
+            # object_placements = self.placement_initializer.sample()
+            # import ipdb; ipdb.set_trace()
+
+            grid_size = 5
+            spacing = 0.07
+
+            # Calculate the start and end points for the grid
+            start = -(grid_size // 2)
+            end = (grid_size - 1) // 2
+
+            # Generate a list of tuples for all positions in the grid
+            grid_positions = [(i, j, 0) for i in range(start, end + 1) for j in range(start, end + 1)]
+
+            # Multiply the grid positions by the spacing
+            grid_positions = [(x * spacing, y * spacing, z * spacing) for x, y, z in grid_positions]
+            distractor_positions = []
+            for i, obj in enumerate(self.distractor_objects):
+                # TODO: add some randomness to the distractor object placements
+                obj_pos = grid_positions[i] + self.bin1_pos
+                obj_pos[:2] += np.random.uniform(-0.02, 0.02, 2)
+                obj_pos[2] += 0.1
+
+                obj_quat = self.placement_initializer.samplers["CollisionObjectSampler"]._sample_quat()
+                # multiply this quat by the object's initial rotation if it has the attribute specified
+                if hasattr(obj, "init_quat"):
+                    obj_quat = T.quat_multiply(obj_quat, obj.init_quat)
+                distractor_positions.append(obj_pos)
+                self.sim.data.set_joint_qpos(obj.joints[0], np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
+            
+            # choose a random distractor position, and set the target object to be below it.
+            targetcube_pos = random.choice(distractor_positions)
+            targetcube_pos[2] -= 0.1
+            targetcube_quat = T.convert_quat(np.array([0, 0, 0, 1]), to="xyzw")
+            for obj in self.objects:
+                if obj.name == self.obj_to_use:
+                    self.sim.data.set_joint_qpos(obj.joints[0], np.concatenate([np.array(targetcube_pos), np.array(targetcube_quat)]))
+                    break
 
             # Loop through all objects and reset their positions
-            for obj_pos, obj_quat, obj in object_placements.values():
-                # Set the visual object body locations
-                if "visual" in obj.name.lower():
-                    self.sim.model.body_pos[self.obj_body_id[obj.name]] = obj_pos
-                    self.sim.model.body_quat[self.obj_body_id[obj.name]] = obj_quat
-                else:
-                    # Set the collision object joints
-                    self.sim.data.set_joint_qpos(obj.joints[0], np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
+            # for obj_pos, obj_quat, obj in object_placements.values():
+            #     # Set the visual object body locations
+            #     if "visual" in obj.name.lower():
+            #         self.sim.model.body_pos[self.obj_body_id[obj.name]] = obj_pos
+            #         self.sim.model.body_quat[self.obj_body_id[obj.name]] = obj_quat
+            #     else:
+            #         # Set the collision object joints
+            #         self.sim.data.set_joint_qpos(obj.joints[0], np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
 
         # Set the bins to the desired position
         self.sim.model.body_pos[self.sim.model.body_name2id("bin1")] = self.bin1_pos
@@ -924,13 +960,17 @@ class ClutterSearchSingle(ClutterSearch):
                                                     0.00, 
                                                     np.pi - 0.2, 
                                                     np.pi / 4])}]
+        robots = kwargs.pop("robots", "Panda")
+        ignore_done = kwargs.pop("ignore_done", True)
+        use_camera_obs = kwargs.pop("use_camera_obs", True)
+        control_freq = kwargs.pop("control_freq", 20)
         super().__init__(
-            robots="Panda",
+            robots=robots,
             gripper_types="Robotiq85Gripper",
             single_object_mode=2, 
             object_type="box", 
-            horizon=100,
-            ignore_done=True,
+            horizon=10000000,
+            ignore_done=ignore_done,
             use_object_obs=False,
             use_camera_obs=True,
             camera_names=["agentview"],
