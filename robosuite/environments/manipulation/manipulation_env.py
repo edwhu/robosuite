@@ -111,6 +111,8 @@ class ManipulationEnv(RobotEnv):
             [multiple / a single] segmentation(s) to use for all cameras. A list of list of str specifies per-camera
             segmentation setting(s) to use.
 
+        robot_configs (list of dict): Per-robot configurations set from any subclass initializers.
+
     Raises:
         ValueError: [Camera obs require offscreen renderer]
         ValueError: [Camera name must be specified to use camera obs]
@@ -142,6 +144,7 @@ class ManipulationEnv(RobotEnv):
         camera_segmentations=None,
         renderer="mujoco",
         renderer_config=None,
+        robot_configs=None,
     ):
         # Robot info
         robots = list(robots) if type(robots) is list or type(robots) is tuple else [robots]
@@ -151,9 +154,11 @@ class ManipulationEnv(RobotEnv):
         gripper_types = self._input2list(gripper_types, num_robots)
 
         # Robot configurations to pass to super call
-        robot_configs = [
+        _robot_configs = [
             {
                 "gripper_type": gripper_types[idx],
+                **(robot_configs[idx] if robot_configs is not None else {}),
+            
             }
             for idx in range(num_robots)
         ]
@@ -181,7 +186,7 @@ class ManipulationEnv(RobotEnv):
             camera_widths=camera_widths,
             camera_depths=camera_depths,
             camera_segmentations=camera_segmentations,
-            robot_configs=robot_configs,
+            robot_configs=_robot_configs,
             renderer=renderer,
             renderer_config=renderer_config,
         )

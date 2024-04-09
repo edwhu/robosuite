@@ -56,33 +56,19 @@ class GymWrapper(Wrapper, gym.Env):
 
         # set up observation and action spaces
         obs = self.env.reset()
-        self.modality_dims = {key: obs[key].shape for key in self.keys}
-        flat_ob = self._flatten_obs(obs)
-        self.obs_dim = flat_ob.size
-        high = np.inf * np.ones(self.obs_dim)
-        low = -high
-        self.observation_space = spaces.Box(low, high)
+        _observation_space = {}
+        for k in self.keys:
+            shape = obs[k].shape
+            dtype = obs[k].dtype
+            low = -np.inf
+            high = np.inf
+            if dtype == np.uint8:
+                low = 0
+                high = 255
+            _observation_space[k] = spaces.Box(low=low, high=high, shape=shape, dtype=dtype)
+        self.observation_space = spaces.Dict(_observation_space)
         low, high = self.env.action_spec
         self.action_space = spaces.Box(low, high)
-
-    def _flatten_obs(self, obs_dict, verbose=False):
-        """
-        Filters keys of interest out and concatenate the information.
-
-        Args:
-            obs_dict (OrderedDict): ordered dictionary of observations
-            verbose (bool): Whether to print out to console as observation keys are processed
-
-        Returns:
-            np.array: observations flattened into a 1d array
-        """
-        ob_lst = []
-        for key in self.keys:
-            if key in obs_dict:
-                if verbose:
-                    print("adding key: {}".format(key))
-                ob_lst.append(np.array(obs_dict[key]).flatten())
-        return np.concatenate(ob_lst)
 
     def reset(self, seed=None, options=None):
         """
@@ -97,7 +83,7 @@ class GymWrapper(Wrapper, gym.Env):
             else:
                 raise TypeError("Seed must be an integer type!")
         ob_dict = self.env.reset()
-        return self._flatten_obs(ob_dict), {}
+        return ob_dict, {}
 
     def step(self, action):
         """
@@ -116,7 +102,7 @@ class GymWrapper(Wrapper, gym.Env):
                 - (dict) misc information
         """
         ob_dict, reward, terminated, info = self.env.step(action)
-        return self._flatten_obs(ob_dict), reward, terminated, False, info
+        return ob_dict, reward, terminated, False, info
 
     def compute_reward(self, achieved_goal, desired_goal, info):
         """
