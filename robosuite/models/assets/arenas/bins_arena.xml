@@ -81,7 +81,9 @@
     <!-- bird view -->
     <camera mode="fixed" name="birdview" pos="-0.2 0 3.0" quat="0.7071 0 0 0.7071"/>
     <!-- agent view -->
-    <camera mode="fixed" name="agentview" pos="1.0 0 1.75" quat="0.653 0.271 0.271 0.653"/>
+    <!-- <camera mode="fixed" name="agentview" pos="1.0 0 1.75" quat="0.653 0.271 0.271 0.653"/> -->
+    <camera mode="fixed" name="agentview" pos="0.5 -0.1 1.3" quat="0.653 0.271 0.271 0.653"/>
+    <!-- <site pos="1.0 0 1.75" name="agentview_site" rgba="0 0 0 1" size="0.05"/> -->
     <!-- under view -->
     <camera mode="fixed" name="underview" pos="0.1 -0.1 0.2" euler="3.14 0 0"/>
   </worldbody>

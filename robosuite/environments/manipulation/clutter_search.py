@@ -260,29 +260,48 @@ class ClutterSearch(SingleArmEnv):
         """
         observations = super()._get_observations(force_update)
 
-        targetcube_id = self.object_to_id["box"]
-        convention = IMAGE_CONVENTION_MAPPING[macros.IMAGE_CONVENTION]
-        name2id = {inst: i for i, inst in enumerate(list(self.model.instances_to_ids.keys()))}
-        mapping = {idn: name2id[inst] for idn, inst in self.model.geom_ids_to_instances.items()}
-        for camera in ["agentview", "robot0_eye_in_hand", "underview"]:
-            seg = self.sim.render(
-                camera_name="agentview",
-                width=64,
-                height=64,
-                depth=False,
-                segmentation=True,
-            )
-            seg = np.expand_dims(seg[::convention, :, 1], axis=-1)
-            # Map raw IDs to grouped IDs if we're using instance or class-level segmentation
-            seg = (
-                np.fromiter(map(lambda x: mapping.get(x, -1), seg.flatten()), dtype=np.int32).reshape(
-                    64, 64, 1
-                )
-            )
-            seg[seg == targetcube_id] = 255
-            seg[seg != targetcube_id] = 0
-            seg = seg.astype(np.uint8)
-            observations[f"{camera}_segmentation_instance"]  = seg
+        # targetcube_id = self.object_to_id["box"]
+        # convention = IMAGE_CONVENTION_MAPPING[macros.IMAGE_CONVENTION]
+        # name2id = {inst: i for i, inst in enumerate(list(self.model.instances_to_ids.keys()))}
+        # mapping = {idn: name2id[inst] for idn, inst in self.model.geom_ids_to_instances.items()}
+        # cam_w = cam_h = 128
+        # for camera in ["agentview", "robot0_eye_in_hand", "underview"]:
+        #     raw_seg = self.sim.render(
+        #         camera_name=camera,
+        #         width=cam_w,
+        #         height=cam_h,
+        #         depth=False,
+        #         segmentation=True,
+        #     )
+        #     raw_seg = np.expand_dims(raw_seg[::convention, :, 1], axis=-1)
+        #     # import ipdb; ipdb.set_trace()
+        #     # Map raw IDs to grouped IDs if we're using instance or class-level segmentation
+        #     seg = (
+        #         np.fromiter(map(lambda x: mapping.get(x, -1), raw_seg.flatten()), dtype=np.int32).reshape(
+        #             cam_h, cam_w, 1
+        #         )
+        #     )
+        #     targetcube_mask = (seg == targetcube_id).astype(np.uint8)
+        #     targetcube_pixels = np.sum(targetcube_mask)
+        #     print(camera, targetcube_pixels)
+
+        #     rgb = self.sim.render(
+        #         camera_name=camera,
+        #         width=cam_w,
+        #         height=cam_h,
+        #         depth=False,
+        #         segmentation=False,
+        #     )
+        #     observations[f"{camera}_rgb_debug"] = rgb
+
+        #     targetcube_seg_rgb = ((seg == targetcube_id).astype(np.uint8) * 255).astype(np.uint8)
+        #     import imageio
+        #     # imageio.imwrite(f"/tmp/{camera}_seg_rgb.png", targetcube_seg_rgb.squeeze())
+
+        #     # seg[seg == targetcube_id] = 255
+        #     # seg[seg != targetcube_id] = 0
+        #     # seg = seg.astype(np.uint8)
+        #     observations[f"{camera}_segmentation_instance"]  = targetcube_seg_rgb
 
         return observations
 
@@ -973,7 +992,7 @@ class ClutterSearchSingle(ClutterSearch):
             ignore_done=ignore_done,
             use_object_obs=False,
             use_camera_obs=use_camera_obs,
-            camera_names=["agentview"],
+            camera_names=["agentview", "underview"],
             camera_widths=64,
             camera_heights=64,
             control_freq=control_freq,
