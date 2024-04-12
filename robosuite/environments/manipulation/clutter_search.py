@@ -22,6 +22,7 @@ from robosuite.utils.mjcf_utils import CustomMaterial, IMAGE_CONVENTION_MAPPING
 from robosuite.models.tasks import ManipulationTask
 from robosuite.utils.observables import Observable, sensor
 from robosuite.utils.placement_samplers import SequentialCompositeSampler, UniformRandomSampler
+from robosuite.controllers.controller_factory import load_controller_config
 
 
 class ClutterSearch(SingleArmEnv):
@@ -172,7 +173,7 @@ class ClutterSearch(SingleArmEnv):
         initialization_noise="default",
         table_full_size=(0.39, 0.39, 0.82),
         table_friction=(1, 0.005, 0.0001),
-        bin1_pos=(0.1, -0.1, 0.8),
+        bin1_pos=(0.0, -0.1, 0.8),
         bin2_pos=(0.1, 0.28, 0.8),
         use_camera_obs=True,
         use_object_obs=True,
@@ -201,9 +202,11 @@ class ClutterSearch(SingleArmEnv):
     ):
         # task settings
         self.single_object_mode = single_object_mode
-        self.object_to_id = {"milk": 0, "bread": 1, "cereal": 2, "can": 3, "box": 4}
+        # self.object_to_id = {"milk": 0, "bread": 1, "cereal": 2, "can": 3, "box": 4}
+        self.object_to_id = {"box": 0}
         self.object_id_to_sensors = {}  # Maps object id to sensor names for that object
-        self.obj_names = ["Milk", "Bread", "Cereal", "Can", "Box"]
+        # self.obj_names = ["Milk", "Bread", "Cereal", "Can", "Box"]
+        self.obj_names = ["Box"]
         if object_type is not None:
             assert object_type in self.object_to_id.keys(), "invalid @object_type argument - choose one of {}".format(
                 list(self.object_to_id.keys())
@@ -311,25 +314,32 @@ class ClutterSearch(SingleArmEnv):
         name2id = {inst: i for i, inst in enumerate(list(self.model.instances_to_ids.keys()))}
         mapping = {idn: name2id[inst] for idn, inst in self.model.geom_ids_to_instances.items()}
         cam_w = cam_h = 128
-        seg = self.sim.render(
-            camera_name="agentview",
-            width=cam_w,
-            height=cam_h,
-            depth=False,
-            segmentation=True,
-        )
-        seg = np.expand_dims(seg[::convention, :, 1], axis=-1)
-        # Map raw IDs to grouped IDs if we're using instance or class-level segmentation
-        seg = (
-            np.fromiter(map(lambda x: mapping.get(x, -1), seg.flatten()), dtype=np.int32).reshape(
-                cam_h, cam_w, 1
+        self.reward_per_view = {}
+        total_reward = 0
+        for camera in ["agentview", "robot0_eye_in_hand"]:
+            seg = self.sim.render(
+                camera_name=camera,
+                width=cam_w,
+                height=cam_h,
+                depth=False,
+                segmentation=True,
             )
-        )
-        targetcube_id = self.object_to_id["box"]
-        # then compute number of pixels in Box object's mask.
-        targetcube_mask = (seg == targetcube_id).astype(np.uint8)
-        targetcube_pixels = np.sum(targetcube_mask)
-        return targetcube_pixels
+            seg = np.expand_dims(seg[::convention, :, 1], axis=-1)
+            # Map raw IDs to grouped IDs if we're using instance or class-level segmentation
+            seg = (
+                np.fromiter(map(lambda x: mapping.get(x, -1), seg.flatten()), dtype=np.int32).reshape(
+                    cam_h, cam_w, 1
+                )
+            )
+            targetcube_id = self.object_to_id["box"]
+            # then compute number of pixels in Box object's mask.
+            targetcube_mask = (seg == targetcube_id).astype(np.uint8)
+            targetcube_pixels = np.sum(targetcube_mask)
+            self.reward_per_view[camera] = targetcube_pixels
+            # print(camera, targetcube_pixels)
+            total_reward += targetcube_pixels
+
+        return total_reward
 
         # import imageio 
         # imageio.imwrite("/tmp/seg.png", targetcube_seg_rgb.squeeze())
@@ -638,18 +648,21 @@ class ClutterSearch(SingleArmEnv):
         #     vis_obj = vis_obj_cls(name=vis_name)
         #     self.visual_objects.append(vis_obj)
 
-        for obj_cls, obj_name in zip(
-            (MilkObject, BreadObject, CerealObject, CanObject),
-            self.obj_names,
-        ):
-            obj = obj_cls(name=obj_name)
-            self.objects.append(obj)
+        # for obj_cls, obj_name in zip(
+        #     (MilkObject, BreadObject, CerealObject, CanObject),
+        #     self.obj_names,
+        # ):
+        #     obj = obj_cls(name=obj_name)
+        #     self.objects.append(obj)
 
         obj = BoxObject(
             name=f"targetcube",
-            size=[0.025, 0.025, 0.01],  # [0.018, 0.018, 0.018])
+            size=[0.01, 0.01, 0.001],  # [0.018, 0.018, 0.018])
             rgba=[0, 1, 0, 1],
-            density=1,
+            density=50,
+            friction=[0.95, 0.3, 0.1],
+            solref=[0.001, 1],
+            solimp=[0.998, 0.998, 0.001],
             # material=bluewood,
         )
         self.objects.append(obj)
@@ -658,10 +671,14 @@ class ClutterSearch(SingleArmEnv):
         for i in range(9):
             obj = BoxObject(
                 name=f"cube{i}",
-                size_min=[0.030, 0.030, 0.005],  # [0.015, 0.015, 0.015],
-                size_max=[0.042, 0.042, 0.01],  # [0.018, 0.018, 0.018])
+                # size_min=[0.030, 0.030, 0.005],  # [0.015, 0.015, 0.015],
+                # size_max=[0.042, 0.042, 0.01],  # [0.018, 0.018, 0.018])
+                size=[0.03, 0.03, 0.03],  # [0.015, 0.015, 0.015],
                 rgba=[1, 0, 0, 1],
-                density=1,
+                density=50,
+                friction=[0.95, 0.3, 0.1],
+                solref=[0.001, 1],
+                solimp=[0.998, 0.998, 0.001],
                 material=redwood,
             )
             self.distractor_objects.append(obj)
@@ -837,7 +854,7 @@ class ClutterSearch(SingleArmEnv):
             # import ipdb; ipdb.set_trace()
 
             grid_size = 3
-            spacing = 0.09
+            spacing = 0.1
 
             # Calculate the start and end points for the grid
             start = -(grid_size // 2)
@@ -849,11 +866,13 @@ class ClutterSearch(SingleArmEnv):
             # Multiply the grid positions by the spacing
             grid_positions = [(x * spacing, y * spacing, z * spacing) for x, y, z in grid_positions]
             distractor_positions = []
+            other = []
             for i, obj in enumerate(self.distractor_objects):
                 # TODO: add some randomness to the distractor object placements
                 obj_pos = grid_positions[i] + self.bin1_pos
-                obj_pos[:2] += np.random.uniform(-0.02, 0.02, 2)
-                obj_pos[2] += 0.1
+                other.append(obj_pos.copy())
+                obj_pos[:2] += np.random.uniform(-0.01, 0.01, 2)
+                obj_pos[2] += 0.05
 
                 obj_quat = self.placement_initializer.samplers["CollisionObjectSampler"]._sample_quat()
                 # multiply this quat by the object's initial rotation if it has the attribute specified
@@ -863,8 +882,8 @@ class ClutterSearch(SingleArmEnv):
                 self.sim.data.set_joint_qpos(obj.joints[0], np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
             
             # choose a random distractor position, and set the target object to be below it.
-            targetcube_pos = random.choice(distractor_positions)
-            targetcube_pos[2] -= 0.1
+            targetcube_pos = random.choice(other)
+            # targetcube_pos[2] -= 0.1
             targetcube_quat = T.convert_quat(np.array([0, 0, 0, 1]), to="xyzw")
             for obj in self.objects:
                 if obj.name == self.obj_to_use:
@@ -970,7 +989,6 @@ class ClutterSearchSingle(ClutterSearch):
 
     def __init__(self, **kwargs):
         assert "single_object_mode" not in kwargs, "invalid set of arguments"
-        # return np.array([0, np.pi / 16.0, 0.00, -np.pi / 2.0 - np.pi / 3.0, 0.00, np.pi - 0.2, np.pi / 4])
         robot_configs = [{"initial_qpos": np.array([0, 
                                                     0.5 , 
                                                     0.00, 
@@ -978,12 +996,17 @@ class ClutterSearchSingle(ClutterSearch):
                                                     0.00, 
                                                     np.pi - 0.2, 
                                                     np.pi / 4])}]
+        _controller_config = load_controller_config(default_controller="OSC_POSE")
+        _controller_config["position_limits"] = [[-0.2, -0.3, 0.8], [0.2, 0.1, 100]]
+        controller_config = kwargs.pop("controller_configs", _controller_config)
+
         robots = kwargs.pop("robots", "Panda")
         ignore_done = kwargs.pop("ignore_done", True)
         use_camera_obs = kwargs.pop("use_camera_obs", True)
         control_freq = kwargs.pop("control_freq", 20)
         super().__init__(
             robots=robots,
+            controller_configs=controller_config,
             gripper_types="Robotiq85Gripper",
             single_object_mode=2, 
             object_type="box", 
@@ -992,6 +1015,45 @@ class ClutterSearchSingle(ClutterSearch):
             use_object_obs=False,
             use_camera_obs=use_camera_obs,
             camera_names=["agentview", "underview"],
+            camera_widths=64,
+            camera_heights=64,
+            control_freq=control_freq,
+            robot_configs=robot_configs,
+            **kwargs
+        )
+
+class ClutterSearchSingleState(ClutterSearch):
+    """
+    Use states as input
+    """
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        robot_configs = [{"initial_qpos": np.array([0, 
+                                                    0.5 , 
+                                                    0.00, 
+                                                    -np.pi / 2.0  - 0.7, 
+                                                    0.00, 
+                                                    np.pi - 0.2, 
+                                                    np.pi / 4])}]
+        _controller_config = load_controller_config(default_controller="OSC_POSE")
+        _controller_config["position_limits"] = [[-0.2, -0.3, 0.8], [0.2, 0.1, 100]]
+        controller_config = kwargs.pop("controller_configs", _controller_config)
+
+        robots = kwargs.pop("robots", "Panda")
+        ignore_done = kwargs.pop("ignore_done", True)
+        use_camera_obs = kwargs.pop("use_camera_obs", True)
+        control_freq = kwargs.pop("control_freq", 20)
+        super().__init__(
+            robots=robots,
+            controller_configs=controller_config,
+            gripper_types="Robotiq85Gripper",
+            single_object_mode=2, 
+            object_type="box", 
+            horizon=10000000,
+            ignore_done=ignore_done,
+            use_object_obs=True,
+            use_camera_obs=use_camera_obs,
+            camera_names=["agentview"],
             camera_widths=64,
             camera_heights=64,
             control_freq=control_freq,
