@@ -1,6 +1,6 @@
 <mujoco model="bins_arena">
   <asset>
-    <texture builtin="gradient" height="256" rgb1=".9 .9 1." rgb2=".2 .3 .4" type="skybox" width="256"/>
+    <texture builtin="gradient" height="256" rgb1=".0 .0 0." rgb2=".0 .0 .0" type="skybox" width="256"/>
     <texture file="../textures/light-gray-floor-tile.png" type="2d" name="texplane"/>
     <material name="floorplane" reflectance="0.01" shininess="0.0" specular="0.0" texrepeat="2 2" texture="texplane" texuniform="true"/>
     <!-- steel legs -->

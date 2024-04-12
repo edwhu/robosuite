@@ -647,19 +647,18 @@ class ClutterSearch(SingleArmEnv):
 
         obj = BoxObject(
             name=f"targetcube",
-            size_min=[0.015, 0.015, 0.005],  # [0.015, 0.015, 0.015],
-            size_max=[0.018, 0.018, 0.01],  # [0.018, 0.018, 0.018])
-            rgba=[1, 0, 0, 1],
+            size=[0.025, 0.025, 0.01],  # [0.018, 0.018, 0.018])
+            rgba=[0, 1, 0, 1],
             density=1,
-            material=bluewood,
+            # material=bluewood,
         )
         self.objects.append(obj)
 
         # initialize objects of interest
-        for i in range(25):
+        for i in range(9):
             obj = BoxObject(
                 name=f"cube{i}",
-                size_min=[0.020, 0.020, 0.005],  # [0.015, 0.015, 0.015],
+                size_min=[0.030, 0.030, 0.005],  # [0.015, 0.015, 0.015],
                 size_max=[0.042, 0.042, 0.01],  # [0.018, 0.018, 0.018])
                 rgba=[1, 0, 0, 1],
                 density=1,
@@ -837,8 +836,8 @@ class ClutterSearch(SingleArmEnv):
             # object_placements = self.placement_initializer.sample()
             # import ipdb; ipdb.set_trace()
 
-            grid_size = 5
-            spacing = 0.07
+            grid_size = 3
+            spacing = 0.09
 
             # Calculate the start and end points for the grid
             start = -(grid_size // 2)
