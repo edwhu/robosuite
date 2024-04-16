@@ -309,7 +309,7 @@ class ClutterSearch(SingleArmEnv):
         return observations
 
     def reward(self, action=None):
-        reach_mult = 0.1
+        reach_mult = 0.05
         seg_mult = 10.0
 
         # Get instance level segmentation mask
@@ -880,6 +880,47 @@ class ClutterSearchSingle(ClutterSearch):
                                                     np.pi - 0.2, 
                                                     np.pi / 4])}]
         _controller_config = load_controller_config(default_controller="OSC_POSE")
+        _controller_config["position_limits"] = [[-0.2, -0.3, 0.8], [0.2, 0.1, 100]]
+        controller_config = kwargs.pop("controller_configs", _controller_config)
+
+        robots = kwargs.pop("robots", "Panda")
+        ignore_done = kwargs.pop("ignore_done", True)
+        use_camera_obs = kwargs.pop("use_camera_obs", True)
+        control_freq = kwargs.pop("control_freq", 20)
+        super().__init__(
+            robots=robots,
+            controller_configs=controller_config,
+            gripper_types="Robotiq85Gripper",
+            single_object_mode=2, 
+            object_type="box", 
+            horizon=10000000,
+            ignore_done=ignore_done,
+            use_object_obs=False,
+            use_camera_obs=use_camera_obs,
+            camera_names=["agentview", "underview"],
+            camera_widths=64,
+            camera_heights=64,
+            control_freq=control_freq,
+            robot_configs=robot_configs,
+            **kwargs
+        )
+
+class ClutterSearchSinglePosition(ClutterSearch):
+    """
+    Easier version of task - place one object into its bin.
+    A new object is sampled on every reset.
+    """
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        robot_configs = [{"initial_qpos": np.array([0, 
+                                                    0.5 , 
+                                                    0.00, 
+                                                    -np.pi / 2.0  - 0.7, 
+                                                    0.00, 
+                                                    np.pi - 0.2, 
+                                                    np.pi / 4])}]
+        _controller_config = load_controller_config(default_controller="OSC_POSITION")
         _controller_config["position_limits"] = [[-0.2, -0.3, 0.8], [0.2, 0.1, 100]]
         controller_config = kwargs.pop("controller_configs", _controller_config)
 
