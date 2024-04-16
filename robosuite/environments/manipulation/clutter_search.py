@@ -309,13 +309,16 @@ class ClutterSearch(SingleArmEnv):
         return observations
 
     def reward(self, action=None):
+        reach_mult = 0.1
+        seg_mult = 10.0
+
         # Get instance level segmentation mask
         convention = IMAGE_CONVENTION_MAPPING[macros.IMAGE_CONVENTION]
         name2id = {inst: i for i, inst in enumerate(list(self.model.instances_to_ids.keys()))}
         mapping = {idn: name2id[inst] for idn, inst in self.model.geom_ids_to_instances.items()}
         cam_w = cam_h = 128
-        self.reward_per_view = {}
-        total_reward = 0
+        self.rew_info_dict = {}
+        r_seg = 0
         for camera in ["agentview", "robot0_eye_in_hand"]:
             seg = self.sim.render(
                 camera_name=camera,
@@ -334,12 +337,21 @@ class ClutterSearch(SingleArmEnv):
             targetcube_id = self.object_to_id["box"]
             # then compute number of pixels in Box object's mask.
             targetcube_mask = (seg == targetcube_id).astype(np.uint8)
-            targetcube_pixels = np.sum(targetcube_mask)
-            self.reward_per_view[camera] = targetcube_pixels
+            camera_r_seg = np.sum(targetcube_mask) / (cam_h * cam_w) * seg_mult
+            self.rew_info_dict[f"{camera}_r_seg"] = camera_r_seg
             # print(camera, targetcube_pixels)
-            total_reward += targetcube_pixels
+            r_seg += camera_r_seg
 
-        return total_reward
+        # reaching reward to initial targetcube position.
+        gripper = self.robots[0].gripper
+        gripper_pos = self.sim.data.get_site_xpos(gripper.important_sites["grip_site"])
+        diff = np.linalg.norm(self.init_targetcube_pos - gripper_pos)
+        r_reach = (1 - np.tanh(10.0 * diff)) * reach_mult
+        self.rew_info_dict['r_reach'] = r_reach
+        # print(diff, r_reach)
+        # print(f'r_reach {r_reach:.4f}', 'r_seg', r_seg)
+        reward = r_reach + r_seg
+        return reward
 
         # import imageio 
         # imageio.imwrite("/tmp/seg.png", targetcube_seg_rgb.squeeze())
@@ -355,138 +367,10 @@ class ClutterSearch(SingleArmEnv):
         # import ipdb; ipdb.set_trace()
 
 
-    # def reward(self, action=None):
-    #     """
-    #     Reward function for the task.
-
-    #     Sparse un-normalized reward:
-
-    #       - a discrete reward of 1.0 per object if it is placed in its correct bin
-
-    #     Un-normalized components if using reward shaping, where the maximum is returned if not solved:
-
-    #       - Reaching: in [0, 0.1], proportional to the distance between the gripper and the closest object
-    #       - Grasping: in {0, 0.35}, nonzero if the gripper is grasping an object
-    #       - Lifting: in {0, [0.35, 0.5]}, nonzero only if object is grasped; proportional to lifting height
-    #       - Hovering: in {0, [0.5, 0.7]}, nonzero only if object is lifted; proportional to distance from object to bin
-
-    #     Note that a successfully completed task (object in bin) will return 1.0 per object irregardless of whether the
-    #     environment is using sparse or shaped rewards
-
-    #     Note that the final reward is normalized and scaled by reward_scale / 4.0 (or 1.0 if only a single object is
-    #     being used) as well so that the max score is equal to reward_scale
-
-    #     Args:
-    #         action (np.array): [NOT USED]
-
-    #     Returns:
-    #         float: reward value
-    #     """
-    #     # compute sparse rewards
-    #     self._check_success()
-    #     reward = np.sum(self.objects_in_bins)
-
-    #     # add in shaped rewards
-    #     if self.reward_shaping:
-    #         staged_rewards = self.staged_rewards()
-    #         reward += max(staged_rewards)
-    #     if self.reward_scale is not None:
-    #         reward *= self.reward_scale
-    #         if self.single_object_mode == 0:
-    #             reward /= 4.0
-    #     return reward
-
-    # def staged_rewards(self):
-    #     """
-    #     Returns staged rewards based on current physical states.
-    #     Stages consist of reaching, grasping, lifting, and hovering.
-
-    #     Returns:
-    #         4-tuple:
-
-    #             - (float) reaching reward
-    #             - (float) grasping reward
-    #             - (float) lifting reward
-    #             - (float) hovering reward
-    #     """
-
-    #     reach_mult = 0.1
-    #     grasp_mult = 0.35
-    #     lift_mult = 0.5
-    #     hover_mult = 0.7
-
-    #     # filter out objects that are already in the correct bins
-    #     active_objs = []
-    #     for i, obj in enumerate(self.objects):
-    #         if self.objects_in_bins[i]:
-    #             continue
-    #         active_objs.append(obj)
-
-    #     # reaching reward governed by distance to closest object
-    #     r_reach = 0.0
-    #     if active_objs:
-    #         # get reaching reward via minimum distance to a target object
-    #         dists = [
-    #             self._gripper_to_target(
-    #                 gripper=self.robots[0].gripper,
-    #                 target=active_obj.root_body,
-    #                 target_type="body",
-    #                 return_distance=True,
-    #             )
-    #             for active_obj in active_objs
-    #         ]
-    #         r_reach = (1 - np.tanh(10.0 * min(dists))) * reach_mult
-
-    #     # grasping reward for touching any objects of interest
-    #     r_grasp = (
-    #         int(
-    #             self._check_grasp(
-    #                 gripper=self.robots[0].gripper,
-    #                 object_geoms=[g for active_obj in active_objs for g in active_obj.contact_geoms],
-    #             )
-    #         )
-    #         * grasp_mult
-    #     )
-
-    #     # lifting reward for picking up an object
-    #     r_lift = 0.0
-    #     if active_objs and r_grasp > 0.0:
-    #         z_target = self.bin2_pos[2] + 0.25
-    #         object_z_locs = self.sim.data.body_xpos[[self.obj_body_id[active_obj.name] for active_obj in active_objs]][
-    #             :, 2
-    #         ]
-    #         z_dists = np.maximum(z_target - object_z_locs, 0.0)
-    #         r_lift = grasp_mult + (1 - np.tanh(15.0 * min(z_dists))) * (lift_mult - grasp_mult)
-
-    #     # hover reward for getting object above bin
-    #     r_hover = 0.0
-    #     if active_objs:
-    #         target_bin_ids = [self.object_to_id[active_obj.name.lower()] for active_obj in active_objs]
-    #         # segment objects into left of the bins and above the bins
-    #         object_xy_locs = self.sim.data.body_xpos[[self.obj_body_id[active_obj.name] for active_obj in active_objs]][
-    #             :, :2
-    #         ]
-    #         y_check = (
-    #             np.abs(object_xy_locs[:, 1] - self.target_bin_placements[target_bin_ids, 1]) < self.bin_size[1] / 4.0
-    #         )
-    #         x_check = (
-    #             np.abs(object_xy_locs[:, 0] - self.target_bin_placements[target_bin_ids, 0]) < self.bin_size[0] / 4.0
-    #         )
-    #         objects_above_bins = np.logical_and(x_check, y_check)
-    #         objects_not_above_bins = np.logical_not(objects_above_bins)
-    #         dists = np.linalg.norm(self.target_bin_placements[target_bin_ids, :2] - object_xy_locs, axis=1)
-    #         # objects to the left get r_lift added to hover reward,
-    #         # those on the right get max(r_lift) added (to encourage dropping)
-    #         r_hover_all = np.zeros(len(active_objs))
-    #         r_hover_all[objects_above_bins] = lift_mult + (1 - np.tanh(10.0 * dists[objects_above_bins])) * (
-    #             hover_mult - lift_mult
-    #         )
-    #         r_hover_all[objects_not_above_bins] = r_lift + (1 - np.tanh(10.0 * dists[objects_not_above_bins])) * (
-    #             hover_mult - lift_mult
-    #         )
-    #         r_hover = np.max(r_hover_all)
-
-    #     return r_reach, r_grasp, r_lift, r_hover
+    def _post_action(self, action):
+        reward, done, info = super()._post_action(action)
+        info.update(self.rew_info_dict)
+        return reward, done, info
 
     def not_in_bin(self, obj_pos, bin_id):
 
@@ -671,8 +555,7 @@ class ClutterSearch(SingleArmEnv):
         for i in range(9):
             obj = BoxObject(
                 name=f"cube{i}",
-                # size_min=[0.030, 0.030, 0.005],  # [0.015, 0.015, 0.015],
-                # size_max=[0.042, 0.042, 0.01],  # [0.018, 0.018, 0.018])
+                # size=[0.005, 0.005, 0.005],  # [0.015, 0.015, 0.015],
                 size=[0.03, 0.03, 0.03],  # [0.015, 0.015, 0.015],
                 rgba=[1, 0, 0, 1],
                 density=50,
@@ -882,7 +765,7 @@ class ClutterSearch(SingleArmEnv):
                 self.sim.data.set_joint_qpos(obj.joints[0], np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
             
             # choose a random distractor position, and set the target object to be below it.
-            targetcube_pos = random.choice(other)
+            self.init_targetcube_pos = targetcube_pos = random.choice(other)
             # targetcube_pos[2] -= 0.1
             targetcube_quat = T.convert_quat(np.array([0, 0, 0, 1]), to="xyzw")
             for obj in self.objects:
