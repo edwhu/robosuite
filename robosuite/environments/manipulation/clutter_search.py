@@ -765,7 +765,8 @@ class ClutterSearch(SingleArmEnv):
                 self.sim.data.set_joint_qpos(obj.joints[0], np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
             
             # choose a random distractor position, and set the target object to be below it.
-            self.init_targetcube_pos = targetcube_pos = random.choice(other)
+            self.targetcube_distractor_idx = random.randrange(0, len(other))
+            self.init_targetcube_pos = targetcube_pos = other[self.targetcube_distractor_idx]
             # targetcube_pos[2] -= 0.1
             targetcube_quat = T.convert_quat(np.array([0, 0, 0, 1]), to="xyzw")
             for obj in self.objects:
@@ -808,6 +809,8 @@ class ClutterSearch(SingleArmEnv):
                     # Set all of these sensors to be enabled and active if this is the active object, else False
                     self._observables[name].set_enabled(i == self.object_id)
                     self._observables[name].set_active(i == self.object_id)
+
+        print(f'Target Object Location: {self.get_target_obj_row_col()}')
 
     def _check_success(self):
         """
@@ -863,6 +866,12 @@ class ClutterSearch(SingleArmEnv):
                 target=self.objects[closest_obj_id].root_body,
                 target_type="body",
             )
+
+    def get_target_obj_row_col(self):
+        """
+        Gets row [1-3] and column [1-3] of hidden object
+        """
+        return (self.targetcube_distractor_idx // 3) + 1, (self.targetcube_distractor_idx % 3) + 1
 
 class ClutterSearchSingle(ClutterSearch):
     """
@@ -938,6 +947,48 @@ class ClutterSearchSinglePosition(ClutterSearch):
             ignore_done=ignore_done,
             use_object_obs=False,
             use_camera_obs=use_camera_obs,
+            camera_names=["agentview", "underview"],
+            camera_widths=64,
+            camera_heights=64,
+            control_freq=control_freq,
+            robot_configs=robot_configs,
+            **kwargs
+        )
+
+class ClutterSearchSinglePositionAll(ClutterSearch):
+    """
+    Include all observation keys
+    """
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        robot_configs = [{"initial_qpos": np.array([0, 
+                                                    0.5 , 
+                                                    0.00, 
+                                                    -np.pi / 2.0  - 0.7, 
+                                                    0.00, 
+                                                    np.pi - 0.2, 
+                                                    np.pi / 4])}]
+        _controller_config = load_controller_config(default_controller="OSC_POSITION")
+        _controller_config["position_limits"] = [[-0.2, -0.3, 0.8], [0.2, 0.1, 100]]
+        controller_config = kwargs.pop("controller_configs", _controller_config)
+
+        robots = kwargs.pop("robots", "Panda")
+        ignore_done = kwargs.pop("ignore_done", True)
+        use_camera_obs = kwargs.pop("use_camera_obs", True)
+        control_freq = kwargs.pop("control_freq", 20)
+        has_offscreen_renderer = kwargs.pop("has_offscreen_renderer", True)
+        super().__init__(
+            robots=robots,
+            controller_configs=controller_config,
+            gripper_types="Robotiq85Gripper",
+            single_object_mode=2, 
+            object_type="box", 
+            horizon=350,
+            ignore_done=False,
+            has_offscreen_renderer=True,
+            use_object_obs=True,
+            use_camera_obs=True,
             camera_names=["agentview", "underview"],
             camera_widths=64,
             camera_heights=64,
