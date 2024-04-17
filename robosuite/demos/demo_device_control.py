@@ -95,19 +95,56 @@ Examples:
 """
 
 import argparse
+from pathlib import Path
 
 import numpy as np
 
 import robosuite as suite
 from robosuite import load_controller_config
 from robosuite.utils.input_utils import input2action
-from robosuite.wrappers import VisualizationWrapper
+from robosuite.wrappers import GymWrapper, VisualizationWrapper
+
+class TeleOpPolicy:
+    def __init__(self, action_dim, device, active_robot, active_arm, env_configuration, env=None):
+        self.last_grasp = 0
+        self.action_dim = action_dim
+        self.device = device
+        self.active_robot = active_robot
+        self.active_arm = active_arm
+        self.env_configuration = env_configuration
+        self.env = env  # hold env pointer to optionally render
+
+
+    def __call__(self, obs, state=None):
+        self.env.render()
+        action, self.last_grasp = input2action(device=self.device, robot=self.active_robot, active_arm=self.active_arm, env_configuration=self.env_configuration)
+        action = self._pad_action(action)
+        return {'action': np.array([action])}, state
+
+    def _pad_action(self, action):
+        # Fill out the rest of the action space if necessary
+        rem_action_dim = self.action_dim - action.size
+        if rem_action_dim > 0:
+            # Initialize remaining action space
+            rem_action = np.zeros(rem_action_dim)
+            # This is a multi-arm setting, choose which arm to control and fill the rest with zeros
+            if self.active_arm == "right":
+                action = np.concatenate([action, rem_action])
+            elif self.active_arm == "left":
+                action = np.concatenate([rem_action, action])
+        elif rem_action_dim < 0:
+            # We're in an environment with no gripper action space, so trim the action space to be the action dim
+            action = action[: self.action_dim]
+        
+        return action
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--environment", type=str, default="Lift")
     parser.add_argument("--robots", nargs="+", type=str, default="Panda", help="Which robot(s) to use in the env")
+    parser.add_argument("--episodes", type=int, default=10)
+    parser.add_argument("--logdir", type=str, required=True)
     parser.add_argument(
         "--config", type=str, default="single-arm-opposed", help="Specified environment configuration if necessary"
     )
@@ -146,7 +183,7 @@ if __name__ == "__main__":
         args.config = None
 
     # Create environment
-    env = suite.make(
+    root_env = suite.make(
         **config,
         has_renderer=True,
         has_offscreen_renderer=False,
@@ -159,7 +196,8 @@ if __name__ == "__main__":
     )
 
     # Wrap this environment in a visualization wrapper
-    env = VisualizationWrapper(env, indicator_configs=None)
+    root_env = VisualizationWrapper(root_env, indicator_configs=None)
+    root_env = GymWrapper(root_env)
 
     # Setup printing options for numbers
     np.set_printoptions(formatter={"float": lambda x: "{0:0.3f}".format(x)})
@@ -169,7 +207,7 @@ if __name__ == "__main__":
         from robosuite.devices import Keyboard
 
         device = Keyboard(pos_sensitivity=args.pos_sensitivity, rot_sensitivity=args.rot_sensitivity)
-        env.viewer.add_keypress_callback(device.on_press)
+        root_env.viewer.add_keypress_callback(device.on_press)
     elif args.device == "spacemouse":
         from robosuite.devices import SpaceMouse
 
@@ -177,65 +215,36 @@ if __name__ == "__main__":
     else:
         raise Exception("Invalid device choice: choose either 'keyboard' or 'spacemouse'.")
 
-    while True:
-        # Reset the environment
-        obs = env.reset()
 
-        # Setup rendering
-        cam_id = 0
-        num_cam = len(env.sim.model.camera_names)
-        env.render()
+    # ----- Initialize ----- #
+    # Setup rendering
+    obs = root_env.reset()
+    cam_id = 0
+    num_cam = len(root_env.sim.model.camera_names)
+    root_env.render()
+    # Initialize variables that should the maintained between resets
+    last_grasp = 0
+    # Initialize device control
+    device.start_control()
+    # Set active robot
+    active_robot = root_env.robots[0] if args.config == "bimanual" else root_env.robots[args.arm == "left"]
 
-        # Initialize variables that should the maintained between resets
-        last_grasp = 0
+    policy = TeleOpPolicy(root_env.action_dim, device=device, active_robot=active_robot, active_arm=args.arm, env_configuration=args.config, env=root_env)
+    logdir = Path(args.logdir)
+    logdir.mkdir(parents=True, exist_ok=True)
+    print(f'Observation Space: {root_env.observation_space}')
 
-        # Initialize device control
-        device.start_control()
+    import dreamerv3.embodied as embodied
+    from dreamerv3.embodied.replay.log_replay_wrapper import FromGymnasiumLogReplayDriver
+    step = embodied.Counter()
+    logger = embodied.Logger(step, [
+        embodied.logger.JSONLOutput(logdir, 'metrics.jsonl'),
+        embodied.logger.JSONLOutput(logdir, 'scores.jsonl', 'episode/score'),
+        embodied.logger.TensorBoardOutput(logdir)
+    ])
 
-        while True:
-            # Set active robot
-            active_robot = env.robots[0] if args.config == "bimanual" else env.robots[args.arm == "left"]
+    driver = FromGymnasiumLogReplayDriver(root_env, logdir / 'replay', logger=logger, chunks=256, batch_length=64, replay_size=1e6, on_episode_fns=[], is_gym=False)
+    driver.run(policy, steps=np.inf, episodes=args.episodes)
+    # Step through the simulation and render
+    # obs, reward, done, info = root_env.step(action)
 
-            # Get the newest action
-            action, grasp = input2action(
-                device=device, robot=active_robot, active_arm=args.arm, env_configuration=args.config
-            )
-
-            # If action is none, then this a reset so we should break
-            if action is None:
-                break
-
-            # If the current grasp is active (1) and last grasp is not (-1) (i.e.: grasping input just pressed),
-            # toggle arm control and / or camera viewing angle if requested
-            if last_grasp < 0 < grasp:
-                if args.switch_on_grasp:
-                    args.arm = "left" if args.arm == "right" else "right"
-                if args.toggle_camera_on_grasp:
-                    cam_id = (cam_id + 1) % num_cam
-                    env.viewer.set_camera(camera_id=cam_id)
-            # Update last grasp
-            last_grasp = grasp
-
-            # Fill out the rest of the action space if necessary
-            rem_action_dim = env.action_dim - action.size
-            if rem_action_dim > 0:
-                # Initialize remaining action space
-                rem_action = np.zeros(rem_action_dim)
-                # This is a multi-arm setting, choose which arm to control and fill the rest with zeros
-                if args.arm == "right":
-                    action = np.concatenate([action, rem_action])
-                elif args.arm == "left":
-                    action = np.concatenate([rem_action, action])
-                else:
-                    # Only right and left arms supported
-                    print(
-                        "Error: Unsupported arm specified -- "
-                        "must be either 'right' or 'left'! Got: {}".format(args.arm)
-                    )
-            elif rem_action_dim < 0:
-                # We're in an environment with no gripper action space, so trim the action space to be the action dim
-                action = action[: env.action_dim]
-
-            # Step through the simulation and render
-            obs, reward, done, info = env.step(action)
-            env.render()
