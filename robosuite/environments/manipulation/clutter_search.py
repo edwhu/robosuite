@@ -309,8 +309,8 @@ class ClutterSearch(SingleArmEnv):
         return observations
 
     def reward(self, action=None):
-        reach_mult = 0.05
-        seg_mult = 10.0
+        reach_mult = 0.1
+        seg_mult = 2.5
 
         # Get instance level segmentation mask
         convention = IMAGE_CONVENTION_MAPPING[macros.IMAGE_CONVENTION]
