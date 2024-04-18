@@ -105,20 +105,28 @@ from robosuite.utils.input_utils import input2action
 from robosuite.wrappers import GymWrapper, VisualizationWrapper
 
 class TeleOpPolicy:
-    def __init__(self, action_dim, device, active_robot, active_arm, env_configuration, env=None):
+    def __init__(self, action_dim, device, active_robot, active_arm, env_configuration, blocking=True, env=None):
         self.last_grasp = 0
         self.action_dim = action_dim
         self.device = device
         self.active_robot = active_robot
         self.active_arm = active_arm
         self.env_configuration = env_configuration
+        self.blocking = blocking
         self.env = env  # hold env pointer to optionally render
 
 
     def __call__(self, obs, state=None):
         self.env.render()
-        action, self.last_grasp = input2action(device=self.device, robot=self.active_robot, active_arm=self.active_arm, env_configuration=self.env_configuration)
-        action = self._pad_action(action)
+        if self.blocking:
+            action = np.zeros(self.action_dim, dtype=np.float32)
+            while np.allclose(action[:-1], np.zeros_like(action[:-1])):
+                action, self.last_grasp = input2action(device=self.device, robot=self.active_robot, active_arm=self.active_arm, env_configuration=self.env_configuration)
+                action = self._pad_action(action)
+        else:
+            action, self.last_grasp = input2action(device=self.device, robot=self.active_robot, active_arm=self.active_arm, env_configuration=self.env_configuration)
+            action = self._pad_action(action)
+
         return {'action': np.array([action])}, state
 
     def _pad_action(self, action):
@@ -137,6 +145,15 @@ class TeleOpPolicy:
             action = action[: self.action_dim]
         
         return action
+    
+class EpisodeReset:
+    def __init__(self):
+        self._ep_cntr = embodied.Counter()
+
+    def __call__(self, ep, worker):
+        self._ep_cntr.increment()
+        print(f'Episode {int(self._ep_cntr)} complete.')
+
 
 if __name__ == "__main__":
 
@@ -222,12 +239,9 @@ if __name__ == "__main__":
     cam_id = 0
     num_cam = len(root_env.sim.model.camera_names)
     root_env.render()
-    # Initialize variables that should the maintained between resets
-    last_grasp = 0
-    # Initialize device control
-    device.start_control()
-    # Set active robot
-    active_robot = root_env.robots[0] if args.config == "bimanual" else root_env.robots[args.arm == "left"]
+    last_grasp = 0  # Initialize variables that should the maintained between resets
+    device.start_control()  # Initialize device control
+    active_robot = root_env.robots[0] if args.config == "bimanual" else root_env.robots[args.arm == "left"]  # Set active robot
 
     policy = TeleOpPolicy(root_env.action_dim, device=device, active_robot=active_robot, active_arm=args.arm, env_configuration=args.config, env=root_env)
     logdir = Path(args.logdir)
@@ -243,8 +257,6 @@ if __name__ == "__main__":
         embodied.logger.TensorBoardOutput(logdir)
     ])
 
-    driver = FromGymnasiumLogReplayDriver(root_env, logdir / 'replay', logger=logger, chunks=256, batch_length=64, replay_size=1e6, on_episode_fns=[], is_gym=False)
-    driver.run(policy, steps=np.inf, episodes=args.episodes)
-    # Step through the simulation and render
-    # obs, reward, done, info = root_env.step(action)
+    driver = FromGymnasiumLogReplayDriver(root_env, logdir / 'replay', logger=logger, chunks=256, batch_length=64, replay_size=1e6, on_episode_fns=[EpisodeReset()], is_gym=False)
+    driver.run(policy, steps=0, episodes=args.episodes)
 
