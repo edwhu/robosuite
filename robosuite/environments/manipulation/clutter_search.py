@@ -810,7 +810,6 @@ class ClutterSearch(SingleArmEnv):
                     self._observables[name].set_enabled(i == self.object_id)
                     self._observables[name].set_active(i == self.object_id)
 
-        print(f'Target Object Location: {self.get_target_obj_row_col()}')
 
     def _check_success(self):
         """
@@ -984,7 +983,7 @@ class ClutterSearchSinglePositionAll(ClutterSearch):
             gripper_types="Robotiq85Gripper",
             single_object_mode=2, 
             object_type="box", 
-            horizon=350,
+            horizon=100,
             ignore_done=False,
             has_offscreen_renderer=True,
             use_object_obs=True,
